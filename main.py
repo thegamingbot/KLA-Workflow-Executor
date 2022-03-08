@@ -7,6 +7,9 @@ import logging
 import operator
 from concurrent.futures import ThreadPoolExecutor
 
+ops = {'<': operator.lt, '>': operator.gt,
+       '<=': operator.le, '>=': operator.ge}
+
 
 def parse_yaml(file_name):
     """Function to parse yaml file"""
@@ -21,10 +24,22 @@ def parse_csv(file_name):
     return df
 
 
+def parse_txt(file_name):
+    """Function to parse txt file"""
+    with open(file_name) as f:
+        data = f.read()
+    return data
+
+
 def TimeFunction(name, inp):
     if inp['FunctionInput'][0] == '$':
         var = re.findall(r'\(.*?\)', inp['FunctionInput'])[0][1:-1]
-        fun_inp = globals()[var]
+        while True:
+            try:
+                fun_inp = globals()[var]
+                break
+            except:
+                pass
     else:
         fun_inp = inp['FunctionInput']
     logging.warning(
@@ -41,8 +56,57 @@ def DataLoad(name, inp):
 
 def Binning(name, inp):
     logging.warning(
-        f"{datetime.now()};{name} Executing Binning ({inp['RuleFilename'], inp['DataSet'][2:-1]})")
+        f"{datetime.now()};{name} Executing Binning ({inp['RuleFilename']})")
     bin_data = parse_csv(inp['RuleFilename'])
+    df = globals()[inp['DataSet'][2:-1]].copy()
+    bin_data['RULE'] = bin_data['RULE'].apply(lambda x: x.split(' and '))
+    rule = [i.split(' ') for i in bin_data['RULE'][0]]
+    bin_code = []
+    for index, i in df.iterrows():
+        cond = False
+        for j in rule:
+            if ops[j[1]](int(i['Signal']), int(j[2])):
+                cond = True
+            else:
+                cond = False
+                break
+        if cond:
+            bin_code.append(bin_data.iloc[0]['BIN_ID'])
+        else:
+            bin_code.append(0)
+    df['Bincode'] = bin_code
+    return 'bin', df, df.shape[0]
+
+
+def MergeResults(name, inp):
+    logging.warning(
+        f"{datetime.now()};{name} Executing Merging ({inp['PrecedenceFile']})")
+    precedence = parse_txt(inp['PrecedenceFile']).split(' >> ')
+    df1 = globals()[inp['DataSet1'][2:-1]]
+    df2 = globals()[inp['DataSet2'][2:-1]]
+    df3 = globals()[inp['DataSet3'][2:-1]]
+    df4 = globals()[inp['DataSet4'][2:-1]]
+    df5 = globals()[inp['DataSet5'][2:-1]]
+    df = df1[['Id', 'X', 'Y', 'Signal']].copy()
+    final_bin_code = []
+    for i in range(df.shape[0]):
+        bin_codes = [df1.iloc[i]['Bincode'], df2.iloc[i]['Bincode'], df3.iloc[i]['Bincode'],
+                     df4.iloc[i]['Bincode'], df5.iloc[i]['Bincode']]
+        bin_code = max(bin_codes)
+        for j in bin_codes:
+            if j in precedence:
+                if precedence.index(j) < precedence.index(bin_code):
+                    bin_code = j
+        final_bin_code.append(bin_code)
+    df['Bincode'] = final_bin_code
+    return 'merge', df, df.shape[0]
+
+
+def ExportResults(name, inp):
+    logging.warning(
+        f"{datetime.now()};{name} Executing Exporting ({inp['FileName']})")
+    df = globals()[inp['DefectTable'][2:-1]]
+    df.to_csv(inp['FileName'], index=False)
 
 
 def execute_flow_serial(name, data):
@@ -81,7 +145,6 @@ def execute_flow_parallel(name, data):
 
 
 def execute_task(name, data):
-    ops = {'<': operator.lt, '>': operator.gt}
     logging.warning(f"{datetime.now()};{name} Entry")
     if 'Condition' in data:
         var = re.findall(r'\(.*?\)', data['Condition'])[0][1:-1]
@@ -89,7 +152,8 @@ def execute_task(name, data):
         val = int(data['Condition'].split(var)[1].split(' ')[2])
         while True:
             try:
-                if ops[sym](globals()[var], val):
+                x = globals()[var]
+                if ops[sym](x, val):
                     return_data = globals()[data['Function']](
                         name, data['Inputs'])
                 else:
@@ -97,7 +161,7 @@ def execute_task(name, data):
                     logging.warning(f"{datetime.now()};{name} Skipped")
                 break
             except:
-                pass
+                continue
     else:
         return_data = globals()[data['Function']](name, data['Inputs'])
     if return_data:
@@ -105,7 +169,11 @@ def execute_task(name, data):
             globals()[f'{name}.DataTable'] = return_data[1]
             globals()[f'{name}.NoOfDefects'] = return_data[2]
         elif return_data[0] == "bin":
-            pass
+            globals()[f'{name}.BinningResultsTable'] = return_data[1]
+            globals()[f'{name}.NoOfDefects'] = return_data[2]
+        elif return_data[0] == "merge":
+            globals()[f'{name}.MergedResults'] = return_data[1]
+            globals()[f'{name}.NoOfDefects'] = return_data[2]
     logging.warning(f"{datetime.now()};{name} Exit")
 
 
