@@ -39,8 +39,10 @@ def DataLoad(name, inp):
     return "load", data, data.shape[0]
 
 
-def Binning():
-    pass
+def Binning(name, inp):
+    logging.warning(
+        f"{datetime.now()};{name} Executing Binning ({inp['RuleFilename'], inp['DataSet'][2:-1]})")
+    bin_data = parse_csv(inp['RuleFilename'])
 
 
 def execute_flow_serial(name, data):
@@ -85,11 +87,17 @@ def execute_task(name, data):
         var = re.findall(r'\(.*?\)', data['Condition'])[0][1:-1]
         sym = data['Condition'].split(var)[1].split(' ')[1]
         val = int(data['Condition'].split(var)[1].split(' ')[2])
-        if ops[sym](globals()[var], val):
-            return_data = globals()[data['Function']](name, data['Inputs'])
-        else:
-            return_data = None
-            logging.warning(f"{datetime.now()};{name} Skipped")
+        while True:
+            try:
+                if ops[sym](globals()[var], val):
+                    return_data = globals()[data['Function']](
+                        name, data['Inputs'])
+                else:
+                    return_data = None
+                    logging.warning(f"{datetime.now()};{name} Skipped")
+                break
+            except:
+                pass
     else:
         return_data = globals()[data['Function']](name, data['Inputs'])
     if return_data:
@@ -103,8 +111,8 @@ def execute_task(name, data):
 
 if __name__ == "__main__":
     logging.getLogger().handlers.clear()
-    logging.basicConfig(filename="M2B.log", format='%(message)s', filemode='w')
-    yaml_data = parse_yaml('Milestone2B.yaml')
+    logging.basicConfig(filename="M3A.log", format='%(message)s', filemode='w')
+    yaml_data = parse_yaml('Milestone3A.yaml')
     for key, value in yaml_data.items():
         workflow = key
         globals()[workflow] = value
